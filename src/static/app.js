@@ -3,6 +3,43 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  const loginToggle = document.getElementById("teacher-login-toggle");
+  const loginForm = document.getElementById("teacher-login-form");
+  const teacherSession = document.getElementById("teacher-session");
+  const teacherName = document.getElementById("teacher-name");
+  const authMessage = document.getElementById("auth-message");
+  const publicViewNote = document.getElementById("public-view-note");
+  let isTeacher = false;
+
+  function showAuthMessage(text, isError = false) {
+    authMessage.textContent = text;
+    authMessage.className = isError ? "error" : "success";
+  }
+
+  function updateTeacherControls(username = "") {
+    isTeacher = Boolean(username);
+    document.getElementById("signup-container").classList.toggle("hidden", !isTeacher);
+    document.querySelectorAll(".delete-btn").forEach((button) => {
+      button.classList.toggle("hidden", !isTeacher);
+    });
+    loginToggle.classList.toggle("hidden", isTeacher);
+    loginForm.classList.add("hidden");
+    loginToggle.setAttribute("aria-expanded", "false");
+    teacherSession.classList.toggle("hidden", !isTeacher);
+    publicViewNote.classList.toggle("hidden", isTeacher);
+    teacherName.textContent = username;
+  }
+
+  async function checkTeacherSession() {
+    try {
+      const response = await fetch("/auth/me");
+      const session = await response.json();
+      updateTeacherControls(session.authenticated ? session.username : "");
+    } catch (error) {
+      updateTeacherControls();
+      console.error("Error checking teacher session:", error);
+    }
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -12,6 +49,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.replaceChildren(new Option("-- Select an activity --", ""));
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -59,6 +97,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // Add event listeners to delete buttons
       document.querySelectorAll(".delete-btn").forEach((button) => {
         button.addEventListener("click", handleUnregister);
+        button.classList.toggle("hidden", !isTeacher);
       });
     } catch (error) {
       activitiesList.innerHTML =
@@ -92,7 +131,9 @@ document.addEventListener("DOMContentLoaded", () => {
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
+        messageDiv.textContent = response.status === 401
+          ? "Please sign in as a teacher to manage registrations."
+          : result.detail || "An error occurred";
         messageDiv.className = "error";
       }
 
@@ -137,7 +178,9 @@ document.addEventListener("DOMContentLoaded", () => {
         // Refresh activities list to show updated participants
         fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
+        messageDiv.textContent = response.status === 401
+          ? "Please sign in as a teacher to manage registrations."
+          : result.detail || "An error occurred";
         messageDiv.className = "error";
       }
 
@@ -155,6 +198,61 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Initialize app
-  fetchActivities();
+  loginToggle.addEventListener("click", () => {
+    const isExpanded = loginToggle.getAttribute("aria-expanded") === "true";
+    loginToggle.setAttribute("aria-expanded", String(!isExpanded));
+    loginForm.classList.toggle("hidden", isExpanded);
+    if (!isExpanded) {
+      document.getElementById("teacher-username").focus();
+    }
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(loginForm);
+
+    try {
+      const response = await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: formData.get("username"),
+          password: formData.get("password"),
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        showAuthMessage(result.detail || "Unable to sign in.", true);
+        return;
+      }
+
+      loginForm.reset();
+      authMessage.classList.add("hidden");
+      updateTeacherControls(result.username);
+      await fetchActivities();
+    } catch (error) {
+      showAuthMessage("Unable to sign in. Please try again.", true);
+      console.error("Error signing in:", error);
+    }
+  });
+
+  document.getElementById("teacher-logout").addEventListener("click", async () => {
+    try {
+      await fetch("/auth/logout", { method: "POST" });
+      updateTeacherControls();
+      await fetchActivities();
+      showAuthMessage("You have signed out.");
+    } catch (error) {
+      showAuthMessage("Unable to sign out. Please try again.", true);
+      console.error("Error signing out:", error);
+    }
+  });
+
+  async function initializeApp() {
+    await checkTeacherSession();
+    await fetchActivities();
+  }
+
+  initializeApp();
 });
